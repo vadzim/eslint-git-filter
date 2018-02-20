@@ -1,0 +1,99 @@
+#!/usr/bin/env node
+
+const net = require("net")
+const path = require("path")
+const os = require("os")
+const crypto = require("crypto")
+const fs = require("fs")
+const minimist = require("minimist")
+const linter = require("./linter.js")
+const readStreamText = require("./readStreamText.js")
+
+void (async function main() {
+	const opts = minimist(process.argv.slice(2), {
+		string: ["filename"],
+		boolean: ["standalone", "stop-service", "cached-only", "help"],
+	})
+
+	if (opts.help || process.argv.length < 3) {
+		fs.createReadStream(require.resolve("./README.md")).pipe(process.stdout)
+		return
+	}
+
+	const {
+		"service-idle-time": serviceIdleTime,
+		standalone: isStandalone,
+		"stop-service": stopService,
+		socket: socketPath = isStandalone ? "" : generateSocketPath(),
+		filename: filename = opts._[0],
+	} = opts
+
+	if (stopService) {
+		callService(socketPath, { stopService }, null, exitProcessWithError)
+		return
+	}
+
+	if (isStandalone) {
+		process.stdout.write(await linter(await readStreamText(process.stdin), { filename, cwd: process.cwd() }))
+		return
+	}
+
+	const linterSettings = {
+		filename,
+		serviceIdleTime,
+		cwd: process.cwd(),
+	}
+	callService(socketPath, linterSettings, process.stdin, () =>
+		spawnService([socketPath], () => callService(socketPath, linterSettings, process.stdin, exitProcessWithError)),
+	)
+})().catch(exitProcessWithError)
+
+function generateSocketPath() {
+	const hash = crypto.createHash("md5")
+	hash.update([__filename, process.argv[0], process.argv[1], process.cwd()].join("\0"))
+	const digest = hash.digest("hex")
+	const socketPath = os.tmpdir() + path.sep + "eslint.server." + digest
+	return socketPath
+}
+
+function callService(socketPath, commands, content, onError) {
+	const socket = net
+		.connect(socketPath)
+		.on("error", onError)
+		.on("connect", () => {
+			socket.write(JSON.stringify(commands) + "\n")
+			if (content) {
+				content.pipe(socket)
+			} else {
+				socket.end()
+			}
+			socket.pipe(process.stdout)
+			socket.on("end", () => process.exit(0))
+		})
+}
+
+function spawnService(args, onSuccess) {
+	const child_process = require("child_process")
+	child_process
+		.spawn(process.argv[0], [require.resolve("./service.js"), ...args], {
+			stdio: ["ignore", "pipe", process.stderr],
+			detached: true,
+		})
+		.on("error", exitProcessWithError)
+		.stdout.on("data", cbOnce(onSuccess))
+}
+
+function cbOnce(cb) {
+	let first = true
+	return () => {
+		if (first) {
+			first = false
+			cb()
+		}
+	}
+}
+
+function exitProcessWithError(error) {
+	console.error(error)
+	process.exit(1)
+}

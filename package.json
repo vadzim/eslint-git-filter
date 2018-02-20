@@ -1,0 +1,21 @@
+{
+  "name": "eslint-git-filter",
+  "version": "1.0.0",
+  "description": "git filter for eslint",
+  "main": "index.js",
+  "repository": "https://github.com/vadzim/eslint-git-filter",
+  "author": "developer@vadzim.info",
+  "license": "MIT",
+  "bin": {
+    "eslint-git-filter": "eslint-git-filter"
+  },
+  "scripts": {
+    "prettier": "prettier --write '*.js' 'eslint-git-filter'"
+  },
+  "dependencies": {
+    "minimist": "^1.2.0"
+  },
+  "devDependencies": {
+    "prettier": "^1.10.2"
+  }
+}
